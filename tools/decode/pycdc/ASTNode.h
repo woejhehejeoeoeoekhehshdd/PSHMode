@@ -3,6 +3,7 @@
 
 #include "pyc_module.h"
 #include <list>
+#include <deque>
 
 /* Similar interface to PycObject, so PycRef can work on it... *
  * However, this does *NOT* mean the two are interchangeable!  */
@@ -12,11 +13,11 @@ public:
         NODE_INVALID, NODE_NODELIST, NODE_OBJECT, NODE_UNARY, NODE_BINARY,
         NODE_COMPARE, NODE_SLICE, NODE_STORE, NODE_RETURN, NODE_NAME,
         NODE_DELETE, NODE_FUNCTION, NODE_CLASS, NODE_CALL, NODE_IMPORT,
-        NODE_TUPLE, NODE_LIST, NODE_MAP, NODE_SUBSCR, NODE_PRINT,
+        NODE_TUPLE, NODE_LIST, NODE_SET, NODE_MAP, NODE_SUBSCR, NODE_PRINT,
         NODE_CONVERT, NODE_KEYWORD, NODE_RAISE, NODE_EXEC, NODE_BLOCK,
         NODE_COMPREHENSION, NODE_LOADBUILDCLASS, NODE_AWAITABLE,
         NODE_FORMATTEDVALUE, NODE_JOINEDSTR, NODE_CONST_MAP,
-        NODE_ANNOTATED_VAR, NODE_CHAINSTORE,
+        NODE_ANNOTATED_VAR, NODE_CHAINSTORE, NODE_TERNARY,
 
         // Empty node types
         NODE_LOCALS,
@@ -358,6 +359,18 @@ private:
     value_t m_values;
 };
 
+class ASTSet : public ASTNode {
+public:
+    typedef std::deque<PycRef<ASTNode>> value_t;
+
+    ASTSet(value_t values)
+        : ASTNode(NODE_SET), m_values(std::move(values)) { }
+
+    const value_t& values() const { return m_values; }
+
+private:
+    value_t m_values;
+};
 
 class ASTMap : public ASTNode {
 public:
@@ -550,13 +563,14 @@ private:
 
 class ASTIterBlock : public ASTBlock {
 public:
-    ASTIterBlock(ASTBlock::BlkType blktype, int end, PycRef<ASTNode> iter)
-        : ASTBlock(blktype, end), m_iter(std::move(iter)), m_idx(), m_comp() { }
+    ASTIterBlock(ASTBlock::BlkType blktype, int start, int end, PycRef<ASTNode> iter)
+        : ASTBlock(blktype, end), m_iter(std::move(iter)), m_idx(), m_comp(), m_start(start) { }
 
     PycRef<ASTNode> iter() const { return m_iter; }
     PycRef<ASTNode> index() const { return m_idx; }
     PycRef<ASTNode> condition() const { return m_cond; }
     bool isComprehension() const { return m_comp; }
+    int start() const { return m_start; }
 
     void setIndex(PycRef<ASTNode> idx) { m_idx = std::move(idx); init(); }
     void setCondition(PycRef<ASTNode> cond) { m_cond = std::move(cond); }
@@ -567,6 +581,7 @@ private:
     PycRef<ASTNode> m_idx;
     PycRef<ASTNode> m_cond;
     bool m_comp;
+    int m_start;
 };
 
 class ASTContainerBlock : public ASTBlock {
@@ -691,12 +706,30 @@ public:
     ASTAnnotatedVar(PycRef<ASTNode> name, PycRef<ASTNode> type)
         : ASTNode(NODE_ANNOTATED_VAR), m_name(std::move(name)), m_type(std::move(type)) { }
 
-    const PycRef<ASTNode> name() const { return m_name; }
-    const PycRef<ASTNode> type() const { return m_type; }
+    PycRef<ASTNode> name() const noexcept { return m_name; }
+    PycRef<ASTNode> annotation() const noexcept { return m_type; }
 
 private:
     PycRef<ASTNode> m_name;
     PycRef<ASTNode> m_type;
+};
+
+class ASTTernary : public ASTNode
+{
+public:
+    ASTTernary(PycRef<ASTNode> if_block, PycRef<ASTNode> if_expr,
+               PycRef<ASTNode> else_expr)
+        : ASTNode(NODE_TERNARY), m_if_block(std::move(if_block)),
+          m_if_expr(std::move(if_expr)), m_else_expr(std::move(else_expr)) { }
+
+    PycRef<ASTNode> if_block() const noexcept { return m_if_block; }
+    PycRef<ASTNode> if_expr() const noexcept { return m_if_expr; }
+    PycRef<ASTNode> else_expr() const noexcept { return m_else_expr; }
+
+private:
+    PycRef<ASTNode> m_if_block; // contains "condition" and "negative"
+    PycRef<ASTNode> m_if_expr;
+    PycRef<ASTNode> m_else_expr;
 };
 
 #endif
